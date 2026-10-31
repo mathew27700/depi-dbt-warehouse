@@ -81,7 +81,7 @@ Everything used to build, test, document, ship and visualise the project.
 | | **Mermaid** | | The ER diagram below, rendered natively by GitHub |
 | **Dashboard** | **Vanilla JavaScript + SVG** | | The dashboard: **no frameworks, no CDN, no build step**, works offline |
 | | **Playwright + Microsoft Edge** | 1.64 | Headless browser used to test and screenshot the dashboard (dev only) |
-| **AI assistance** | **Claude Code** | Sonnet 5.5 | AI pair-programmer that authored and verified the project |
+| **AI assistance** | **Claude Code** | Sonnet 5.5 | Helped with checking and fixing errors |
 
 ---
 

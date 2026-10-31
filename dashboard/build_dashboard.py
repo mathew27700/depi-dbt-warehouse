@@ -171,7 +171,7 @@ def tool_stack() -> list[dict]:
         dict(cat="Documentation", name="Mermaid", ver="", use="ER diagram and lineage rendered inside the README", mono="Mm"),
         dict(cat="Dashboard", name="Vanilla JS + SVG", ver="", use="This dashboard: zero libraries, zero CDN, works offline", mono="JS"),
         dict(cat="Dashboard", name="Playwright + Edge", ver=version("playwright") or "1.64", use="Headless browser used to test and screenshot the dashboard (dev only)", mono="Pw"),
-        dict(cat="AI assistance", name="Claude Code", ver="Sonnet 5.5", use="AI pair-programmer that authored and verified the project", mono="Cc"),
+        dict(cat="AI assistance", name="Claude Code", ver="Sonnet 5.5", use="Helped with checking and fixing errors", mono="Cc"),
     ]
 
 
