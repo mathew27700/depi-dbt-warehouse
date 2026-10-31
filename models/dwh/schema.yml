@@ -1,0 +1,330 @@
+version: 2
+
+# =============================================================================
+# DWH layer  ->  schema `dwh`
+# Star schema:   dim_employee / dim_department / dim_country  <--  fct_employee_compensation
+# Dimensions and the fact have ENFORCED CONTRACTS: if a column name or data type
+# ever drifts from what is declared below, the build fails before bad data ships.
+# =============================================================================
+
+models:
+  # ---------------------------------------------------------------- dimensions
+  - name: dim_employee
+    description: >
+      Employee dimension - one row per employee with descriptive attributes
+      (name, contact, age, generation). Contains PII; money lives in the fact.
+    config:
+      contract:
+        enforced: true
+      tags: ["pii"]
+    columns:
+      - name: employee_key
+        description: "{{ doc('surrogate_keys') }}"
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests: [unique, not_null]
+      - name: employee_id
+        description: "Natural key from the source system."
+        data_type: integer
+        data_tests: [unique, not_null]
+      - name: first_name
+        data_type: varchar
+        data_tests: [not_null]
+      - name: last_name
+        data_type: varchar
+        data_tests: [not_null]
+      - name: full_name
+        data_type: varchar
+        data_tests: [not_null]
+      - name: gender
+        data_type: varchar
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["Male", "Female"]
+      - name: email
+        data_type: varchar
+        data_tests: [unique, not_null, is_valid_email]
+      - name: email_domain
+        data_type: varchar
+      - name: date_of_birth
+        data_type: date
+        data_tests: [not_null]
+      - name: age_years
+        description: "Exact age in whole years as of the `as_of_date` variable (default: today)."
+        data_type: integer
+        data_tests:
+          - not_null
+          - value_between:
+              arguments:
+                min_value: 16
+                max_value: 75
+      - name: age_band
+        data_type: varchar
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["<30", "30-39", "40-49", "50+"]
+      - name: generation
+        description: "{{ doc('generation') }}"
+        data_type: varchar
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["Baby Boomer", "Gen X", "Millennial", "Gen Z"]
+
+  - name: dim_department
+    description: "Department dimension - 12 rows, each mapped to a business function group."
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: department_key
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests: [unique, not_null]
+      - name: department_name
+        data_type: varchar
+        data_tests: [unique, not_null]
+      - name: function_group
+        data_type: varchar
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [Technology, Revenue, Corporate, Operations]
+                quote: true
+
+  - name: dim_country
+    description: "Country dimension - one row per country with ISO codes and continent."
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: country_key
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests: [unique, not_null]
+      - name: country_name
+        data_type: varchar
+        data_tests: [unique, not_null]
+      - name: iso_alpha2
+        data_type: varchar
+        data_tests:
+          - not_null
+          # '??' means the country was not found in the lookup seed -> warn, don't break the build.
+          - not_accepted_values:
+              name: all_countries_mapped_to_iso_code
+              arguments:
+                values: ["??"]
+              config:
+                severity: warn
+                store_failures: true
+      - name: iso_alpha3
+        data_type: varchar
+      - name: continent
+        data_type: varchar
+        data_tests:
+          - not_null
+          - accepted_values:
+              name: no_unmapped_continents
+              arguments:
+                values: [Africa, Antarctica, Asia, Europe, North America, Oceania, South America]
+              config:
+                severity: warn
+                store_failures: true
+
+  # ---------------------------------------------------------------------- fact
+  - name: fct_employee_compensation
+    description: >
+      **Grain: one row per employee.** Compensation snapshot with the salary, its
+      band and how it compares with the employee's department and the company.
+    config:
+      contract:
+        enforced: true
+    data_tests:
+      # Money reconciliation: staging payroll == fact payroll (to the cent).
+      - column_sum_matches:
+          arguments:
+            column_name: salary
+            compare_model: ref('stg_employees')
+            compare_column: salary
+      - equal_rowcount:
+          arguments:
+            compare_model: ref('stg_employees')
+    columns:
+      - name: employee_key
+        description: "FK -> dim_employee. Also the primary key of this fact (grain = 1 row per employee)."
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_employee')
+                field: employee_key
+      - name: department_key
+        description: "FK -> dim_department."
+        data_type: varchar
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_department')
+                field: department_key
+      - name: country_key
+        description: "FK -> dim_country."
+        data_type: varchar
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_country')
+                field: country_key
+      - name: employee_id
+        description: "Degenerate dimension - source system id, kept for easy tracing."
+        data_type: integer
+        data_tests: [unique, not_null]
+      - name: salary
+        description: "{{ doc('salary_cleaning') }}"
+        data_type: numeric(12,2)
+        data_tests:
+          - not_null
+          - value_between:
+              arguments:
+                min_value: 0.01
+      - name: salary_band
+        description: "{{ doc('salary_band') }}"
+        data_type: varchar
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [Entry, Mid, Senior, Executive]
+      - name: salary_band_order
+        description: "1 = Entry ... 4 = Executive. Use it to sort `salary_band` correctly in BI tools."
+        data_type: integer
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4]
+                quote: false
+      - name: department_avg_salary
+        description: "Average salary of the employee's department."
+        data_type: numeric(12,2)
+      - name: pct_vs_department_avg
+        description: "How far above (+) or below (-) the department average this salary is, in %."
+        data_type: numeric(8,2)
+      - name: department_salary_rank
+        description: "1 = best paid in the department (ties share a rank)."
+        data_type: integer
+        data_tests:
+          - value_between:
+              arguments:
+                min_value: 1
+      - name: company_salary_percentile
+        description: "0 = lowest paid in the company, 1 = highest paid."
+        data_type: numeric(5,4)
+        data_tests:
+          - value_between:
+              arguments:
+                min_value: 0
+                max_value: 1
+
+  # ---------------------------------------------------------------- aggregates
+  - name: agg_department_summary
+    description: "Headcount, payroll and salary statistics per department. One row per department."
+    columns:
+      - name: department_key
+        data_tests: [unique, not_null]
+      - name: department_name
+        data_tests: [unique, not_null]
+      - name: function_group
+        data_tests: [not_null]
+      - name: headcount
+        data_tests:
+          - not_null
+          - value_between:
+              arguments:
+                min_value: 1
+      - name: total_payroll
+        description: "Sum of monthly salaries."
+        data_tests: [not_null]
+      - name: median_salary
+        description: "Median monthly salary (computed with the cross-warehouse `median` macro)."
+      - name: pct_female
+        data_tests:
+          - value_between:
+              arguments:
+                min_value: 0
+                max_value: 100
+      - name: pct_of_total_payroll
+        description: "Department share of the company payroll. Sums to 100 across departments."
+
+  - name: agg_country_summary
+    description: "Headcount and salary statistics per country, with continent. One row per country."
+    columns:
+      - name: country_key
+        data_tests: [unique, not_null]
+      - name: country_name
+        data_tests: [unique, not_null]
+      - name: headcount
+        data_tests:
+          - not_null
+          - value_between:
+              arguments:
+                min_value: 1
+
+  - name: agg_gender_pay_gap
+    description: >
+      Average salary by gender per department plus a company-wide row.
+      `pay_gap_pct` > 0 means men earn more on average, < 0 means women earn more.
+    columns:
+      - name: department_name
+        data_tests: [unique, not_null]
+      - name: pay_gap_pct
+        data_tests: [not_null]
+
+  - name: agg_data_quality_summary
+    description: "How many rows each staging cleaning/flagging rule touched. A built-in data-quality report."
+    columns:
+      - name: rule_name
+        data_tests: [unique, not_null]
+      - name: affected_rows
+        data_tests: [not_null]
+
+# =============================================================================
+# UNIT TEST - dimension logic on hand-made rows, with a pinned "today"
+# =============================================================================
+unit_tests:
+  - name: dim_employee_age_band_and_generation
+    description: "Birthday-exact age, age band and generation boundaries, with as_of_date pinned to 2026-06-15."
+    model: dim_employee
+    overrides:
+      vars:
+        as_of_date: "2026-06-15"
+    given:
+      - input: ref('stg_employees')
+        rows:
+          - {employee_id: 1, first_name: "A", last_name: "Z", full_name: "A Z", gender: "Male",   email: "a@x.com", email_domain: "x.com", date_of_birth: "1997-06-15"}   # birthday today
+          - {employee_id: 2, first_name: "B", last_name: "Z", full_name: "B Z", gender: "Female", email: "b@x.com", email_domain: "x.com", date_of_birth: "1997-06-16"}   # birthday tomorrow
+          - {employee_id: 3, first_name: "C", last_name: "Z", full_name: "C Z", gender: "Male",   email: "c@x.com", email_domain: "x.com", date_of_birth: "1996-06-15"}
+          - {employee_id: 4, first_name: "D", last_name: "Z", full_name: "D Z", gender: "Female", email: "d@x.com", email_domain: "x.com", date_of_birth: "1980-12-31"}   # last Gen X
+          - {employee_id: 5, first_name: "E", last_name: "Z", full_name: "E Z", gender: "Male",   email: "e@x.com", email_domain: "x.com", date_of_birth: "1981-01-01"}   # first Millennial
+          - {employee_id: 6, first_name: "F", last_name: "Z", full_name: "F Z", gender: "Female", email: "f@x.com", email_domain: "x.com", date_of_birth: "1964-12-31"}   # last Boomer
+    expect:
+      rows:
+        - {employee_id: 1, age_years: 29, age_band: "<30",   generation: "Gen Z"}
+        - {employee_id: 2, age_years: 28, age_band: "<30",   generation: "Gen Z"}
+        - {employee_id: 3, age_years: 30, age_band: "30-39", generation: "Millennial"}
+        - {employee_id: 4, age_years: 45, age_band: "40-49", generation: "Gen X"}
+        - {employee_id: 5, age_years: 45, age_band: "40-49", generation: "Millennial"}
+        - {employee_id: 6, age_years: 61, age_band: "50+",   generation: "Baby Boomer"}

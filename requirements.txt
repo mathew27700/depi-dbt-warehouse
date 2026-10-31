@@ -1,0 +1,7 @@
+# Verified with dbt-core 1.12.6 + dbt-duckdb 1.11.1 (Python 3.12).
+# dbt-core >= 1.10 is required: tests use the `arguments:` syntax and unit tests.
+dbt-core>=1.10,<2
+dbt-duckdb>=1.9
+
+# Optional - only if you want to run against PostgreSQL (--target postgres):
+# dbt-postgres>=1.9

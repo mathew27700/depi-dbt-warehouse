@@ -1,0 +1,32 @@
+version: 2
+
+# Exposures document who consumes the warehouse - they show up at the end of the lineage graph.
+exposures:
+  - name: hr_compensation_dashboard
+    label: HR Compensation Dashboard
+    type: dashboard
+    maturity: medium
+    url: https://example.com/dashboards/hr-compensation   # replace with your BI tool link
+    description: >
+      Headcount, payroll, salary bands and gender pay gap for leadership and HR.
+    depends_on:
+      - ref('fct_employee_compensation')
+      - ref('dim_employee')
+      - ref('dim_department')
+      - ref('dim_country')
+      - ref('agg_department_summary')
+      - ref('agg_gender_pay_gap')
+    owner:
+      name: People Analytics
+      email: people-analytics@example.com
+
+  - name: data_quality_report
+    label: Data Quality Report
+    type: analysis
+    maturity: low
+    description: "Weekly review of rows that the staging layer fixed or flagged."
+    depends_on:
+      - ref('agg_data_quality_summary')
+    owner:
+      name: Data Engineering
+      email: data-eng@example.com

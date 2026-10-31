@@ -1,0 +1,22 @@
+# Python / virtual environments
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# dbt artifacts
+target/
+dbt_packages/
+logs/
+.user.yml
+
+# Local warehouse files (rebuilt from the seeds with `dbt build`)
+data/*.duckdb
+data/*.duckdb.wal
+data/*.wal
+
+# Secrets / editor noise
+.env
+.vscode/
+.idea/
+.DS_Store

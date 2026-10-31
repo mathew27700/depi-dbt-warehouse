@@ -1,0 +1,203 @@
+version: 2
+
+# =============================================================================
+# STAGING layer  ->  schema `staging`
+# Cleaned & typed 1:1 views over the raw seeds. All quality gates for the
+# cleaned data live here; the DWH layer (models/dwh/schema.yml) trusts them.
+# =============================================================================
+
+models:
+  - name: stg_employees
+    description: "{{ doc('stg_employees') }}"
+    config:
+      tags: ["pii"]
+    data_tests:
+      # No row may be lost or duplicated on the way in.
+      - equal_rowcount:
+          arguments:
+            compare_model: ref('raw_employees')
+    columns:
+      - name: employee_id
+        description: "Natural key from the source system. Cast to integer."
+        data_tests:
+          - unique
+          - not_null
+          - value_between:
+              arguments:
+                min_value: 1
+
+      - name: first_name
+        description: "Trimmed first name; stray apostrophe-spaces fixed, lowercase-only names capitalised."
+        data_tests:
+          - not_null
+          - is_trimmed
+          - no_double_spaces
+
+      - name: last_name
+        description: "Trimmed last name (e.g. `O' Sullivan` -> `O'Sullivan`, `oldey` -> `Oldey`)."
+        data_tests:
+          - not_null
+          - is_trimmed
+          - no_double_spaces
+
+      - name: full_name
+        description: "`first_name` + ' ' + `last_name`."
+        data_tests:
+          - not_null
+
+      - name: gender
+        description: "Self-reported gender as supplied by the source."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["Male", "Female"]
+
+      - name: email
+        description: "Lower-cased work e-mail address. Unique per employee."
+        data_tests:
+          - unique
+          - not_null
+          - is_valid_email
+
+      - name: email_domain
+        description: "Everything after the `@` in `email`."
+        data_tests:
+          - not_null
+
+      - name: date_of_birth
+        description: "Date of birth, safely cast to DATE (bad values become NULL and fail the not_null test)."
+        data_tests:
+          - not_null
+          - not_future_date
+          - value_between:
+              arguments:
+                min_value: "cast('1940-01-01' as date)"
+                max_value: "cast('2010-12-31' as date)"
+
+      - name: salary
+        description: "{{ doc('salary_cleaning') }}"
+        data_tests:
+          - not_null
+          # Hard technical limit: a salary can never be zero/negative or absurd.
+          - value_between:
+              arguments:
+                min_value: 0.01
+                max_value: 1000000
+          # Soft business rule: the company pay scale is 3,000 - 10,000.
+          - value_between:
+              name: salary_within_company_pay_scale
+              arguments:
+                min_value: 3000
+                max_value: 10000
+              config:
+                severity: warn
+                store_failures: true
+
+      - name: department
+        description: "One of the 12 company departments."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - Accounting
+                  - Business Development
+                  - Engineering
+                  - Human Resources
+                  - Legal
+                  - Marketing
+                  - Product Management
+                  - Research and Development
+                  - Sales
+                  - Services
+                  - Support
+                  - Training
+          - relationships:
+              arguments:
+                to: ref('stg_department_reference')
+                field: department_name
+
+      - name: country
+        description: "Country where the employee is based (English short name)."
+        data_tests:
+          - not_null
+          # warn only: a brand-new country should alert us, not break the pipeline.
+          - relationships:
+              arguments:
+                to: ref('stg_country_reference')
+                field: country_name
+              config:
+                severity: warn
+                store_failures: true
+
+      - name: has_currency_symbol
+        description: "TRUE when the raw salary was written like `$3206.23`."
+        data_tests:
+          - not_null
+      - name: name_was_fixed
+        description: "TRUE when the name was modified by the cleaning rules."
+        data_tests:
+          - not_null
+      - name: has_suspicious_name_chars
+        description: "TRUE when a name contains characters other than letters, space, dot, apostrophe or hyphen."
+        data_tests:
+          - not_null
+      - name: dbt_loaded_at
+        description: "Timestamp when the row was (re)built by dbt."
+
+  - name: stg_country_reference
+    description: "Country lookup: English country name, ISO 3166 alpha-2/alpha-3 codes and continent."
+    columns:
+      - name: country_name
+        data_tests: [unique, not_null]
+      - name: iso_alpha2
+        data_tests:
+          - unique
+          - not_null
+      - name: iso_alpha3
+        data_tests: [unique, not_null]
+      - name: continent
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [Africa, Antarctica, Asia, Europe, North America, Oceania, South America]
+
+  - name: stg_department_reference
+    description: "Department lookup mapping each department to a business function group."
+    columns:
+      - name: department_name
+        data_tests: [unique, not_null]
+      - name: function_group
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [Technology, Revenue, Corporate, Operations]
+
+# =============================================================================
+# UNIT TESTS - prove the cleaning logic on tiny hand-written inputs
+# (they run *before* the data exists, so bugs are caught without real data).
+# =============================================================================
+unit_tests:
+  - name: stg_employees_cleans_names_money_and_email
+    description: "Covers every cleaning rule: money formats, name fixes, e-mail casing, DQ flags."
+    model: stg_employees
+    given:
+      - input: ref('raw_employees')
+        rows:
+          # '$' salary, padded name, apostrophe-space, upper-case e-mail
+          - {id: "64", first_name: "  Reginauld ", last_name: "O' Sullivan", gender: "Male", email: " ROSullivan1r@Shinystat.COM ", dob: "1981-01-04", salary: "$8256.17", department: "Sales", country: "Mexico"}
+          # salary without '$', lowercase single-word surname
+          - {id: "264", first_name: "Pippo", last_name: "oldey", gender: "Male", email: "poldey7b@mozilla.org", dob: "1987-10-25", salary: "9098.16", department: "Product Management", country: "China"}
+          # suspicious character in the name, integer-looking salary
+          - {id: "288", first_name: "Oralee", last_name: "Giovannacc@i", gender: "Female", email: "ogiovannacci7z@slideshare.net", dob: "1980-05-18", salary: "4910", department: "Training", country: "Brazil"}
+          # legitimate particle must NOT be touched
+          - {id: "1432", first_name: "Janie", last_name: "de Werk", gender: "Female", email: "jdewerkbz@cam.ac.uk", dob: "1982-12-28", salary: "$8133.52", department: "Support", country: "China"}
+    expect:
+      rows:
+        - {employee_id: 64, first_name: "Reginauld", last_name: "O'Sullivan", full_name: "Reginauld O'Sullivan", email: "rosullivan1r@shinystat.com", email_domain: "shinystat.com", salary: 8256.17, has_currency_symbol: true, name_was_fixed: true, has_suspicious_name_chars: false}
+        - {employee_id: 264, first_name: "Pippo", last_name: "Oldey", full_name: "Pippo Oldey", email: "poldey7b@mozilla.org", email_domain: "mozilla.org", salary: 9098.16, has_currency_symbol: false, name_was_fixed: true, has_suspicious_name_chars: false}
+        - {employee_id: 288, first_name: "Oralee", last_name: "Giovannacc@i", full_name: "Oralee Giovannacc@i", email: "ogiovannacci7z@slideshare.net", email_domain: "slideshare.net", salary: 4910.00, has_currency_symbol: false, name_was_fixed: false, has_suspicious_name_chars: true}
+        - {employee_id: 1432, first_name: "Janie", last_name: "de Werk", full_name: "Janie de Werk", email: "jdewerkbz@cam.ac.uk", email_domain: "cam.ac.uk", salary: 8133.52, has_currency_symbol: true, name_was_fixed: false, has_suspicious_name_chars: false}

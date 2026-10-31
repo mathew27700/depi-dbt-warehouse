@@ -1,0 +1,28 @@
+# Project-local profile. Use it with:  dbt <command> --profiles-dir .
+# (or set DBT_PROFILES_DIR=. once). Contains no secrets.
+depi_dbt:
+  target: dev
+  outputs:
+    # Default: a single-file DuckDB warehouse. No server, no install, no credentials.
+    dev:
+      type: duckdb
+      path: data/depi_warehouse.duckdb
+      threads: 4
+
+    # Throw-away in-memory warehouse used by CI.
+    ci:
+      type: duckdb
+      path: ":memory:"
+      threads: 4
+
+    # Optional: the same project on PostgreSQL (pip install dbt-postgres).
+    # Credentials are read from environment variables - nothing is hard-coded.
+    postgres:
+      type: postgres
+      host: "{{ env_var('DBT_PG_HOST', 'localhost') }}"
+      port: "{{ env_var('DBT_PG_PORT', '5432') | as_number }}"
+      user: "{{ env_var('DBT_PG_USER', 'postgres') }}"
+      password: "{{ env_var('DBT_PG_PASSWORD', '') }}"
+      dbname: "{{ env_var('DBT_PG_DATABASE', 'depi') }}"
+      schema: public
+      threads: 4

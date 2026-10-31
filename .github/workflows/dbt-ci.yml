@@ -1,0 +1,39 @@
+name: dbt CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      DBT_PROFILES_DIR: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dbt
+        run: pip install -r requirements.txt
+
+      - name: Parse project (catches YAML/Jinja errors fast)
+        run: dbt parse
+
+      - name: Build everything (seeds, models, data tests, unit tests)
+        run: dbt build
+
+      - name: Generate docs
+        if: always()
+        run: dbt docs generate --static
+
+      - name: Upload docs site
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbt-docs
+          path: target/static_index.html

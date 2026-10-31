@@ -1,0 +1,35 @@
+version: 2
+
+# RAW layer  ->  schema `raw`
+# Data lands exactly as received (everything is text). Only structural
+# guarantees are asserted here; cleaning happens in staging.
+seeds:
+  - name: raw_employees
+    description: >
+      Source extract `DEPI_data.csv` loaded untouched: 3,000 employees.
+      Known quirks (handled in staging): salary is `$1234.56` for some rows and
+      `1234.56` for others, and a few names have stray spaces / casing issues.
+      Only change vs the original file: the header row was lower-cased.
+    columns:
+      - name: id
+        data_tests: [unique, not_null]
+      - name: first_name
+        data_tests: [not_null]
+      - name: last_name
+        data_tests: [not_null]
+      - name: email
+        data_tests: [not_null]
+      - name: dob
+        data_tests: [not_null]
+      - name: salary
+        data_tests: [not_null]
+      - name: department
+        data_tests: [not_null]
+      - name: country
+        data_tests: [not_null]
+
+  - name: ref_country_region
+    description: "Hand-curated lookup of the 159 countries present in the data -> ISO codes and continent."
+
+  - name: ref_department_function
+    description: "Lookup of the 12 departments -> 4 business function groups (Technology, Revenue, Corporate, Operations)."

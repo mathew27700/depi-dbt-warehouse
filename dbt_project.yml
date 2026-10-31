@@ -1,0 +1,96 @@
+name: depi_dbt
+version: "1.0.0"
+config-version: 2
+
+profile: depi_dbt
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+analysis-paths: ["analyses"]
+
+clean-targets: ["target", "dbt_packages", "logs"]
+
+# ---------------------------------------------------------------------------
+# Project variables - tweak business rules here, no SQL edits needed
+# ---------------------------------------------------------------------------
+vars:
+  # Reference date used for age calculations. null => today.
+  # Pin it (e.g. --vars '{as_of_date: 2026-01-01}') for reproducible runs.
+  as_of_date: null
+
+  # Monthly salary band cut-offs (see macros/business_logic/salary_band.sql)
+  salary_band_thresholds:
+    entry_max: 4500
+    mid_max: 6500
+    senior_max: 8500
+
+  # Sanity window for employee age (used by a singular test)
+  min_working_age: 16
+  max_working_age: 75
+
+  # A gender pay gap (in %) above this triggers a warning test
+  pay_gap_warn_threshold_pct: 15
+
+# ---------------------------------------------------------------------------
+# Layers -> one schema each:  raw  ->  staging  ->  dwh   (+ dq_audit for failures)
+# ---------------------------------------------------------------------------
+seeds:
+  depi_dbt:
+    +schema: raw
+    +quote_columns: false
+    +docs:
+      node_color: "#9e9e9e"
+    raw_employees:
+      # Land everything as text, exactly like a real raw/landing zone.
+      # Typing and cleaning is the job of the staging layer.
+      +column_types:
+        id: varchar
+        first_name: varchar
+        last_name: varchar
+        gender: varchar
+        email: varchar
+        dob: varchar
+        salary: varchar
+        department: varchar
+        country: varchar
+
+models:
+  depi_dbt:
+    +persist_docs:
+      relation: true
+      columns: true
+    staging:
+      +schema: staging
+      +materialized: view
+      +tags: ["staging"]
+      +docs:
+        node_color: "#4caf50"
+    dwh:
+      +schema: dwh
+      +materialized: table
+      +tags: ["dwh"]
+      dimensions:
+        +tags: ["dimension"]
+        +docs:
+          node_color: "#1e88e5"
+      facts:
+        +tags: ["fact"]
+        +docs:
+          node_color: "#e53935"
+      aggregates:
+        +tags: ["aggregate"]
+        +docs:
+          node_color: "#fb8c00"
+
+# Failing rows of the *business* tests (singular tests + warn-level tests) are saved
+# to the dq_audit schema so you can inspect exactly which records need attention.
+# Plain structural tests (not_null, unique, ...) stay ephemeral to avoid ~130 empty tables.
+data_tests:
+  depi_dbt:
+    +schema: dq_audit
+    +store_failures: false
+
+on-run-end:
+  - "{{ log_run_summary(results) }}"
