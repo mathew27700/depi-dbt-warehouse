@@ -239,7 +239,7 @@ erDiagram
         varchar continent
     }
     fct_employee_compensation {
-        varchar employee_key PK_FK
+        varchar employee_key PK, FK
         varchar department_key FK
         varchar country_key FK
         numeric salary
