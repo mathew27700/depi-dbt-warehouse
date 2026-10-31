@@ -27,13 +27,22 @@ jobs:
       - name: Build everything (seeds, models, data tests, unit tests)
         run: dbt build
 
-      - name: Generate docs
+      - name: Keep the build results for the dashboard
+        if: always()
+        run: cp target/run_results.json target/build_results.json
+
+      - name: Generate dbt docs
         if: always()
         run: dbt docs generate --static
 
-      - name: Upload docs site
+      - name: Build the dashboard from the warehouse
+        run: python dashboard/build_dashboard.py --out target/dashboard.html
+
+      - name: Upload docs + dashboard
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dbt-docs
-          path: target/static_index.html
+          name: docs-and-dashboard
+          path: |
+            target/static_index.html
+            target/dashboard.html
